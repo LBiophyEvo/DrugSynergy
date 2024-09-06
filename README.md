@@ -1,7 +1,7 @@
 # A Guide for Active Learning in Synergistic Drug Discovery
 
 This is the official codebase for **A Guide for Active Learning in Synergistic Drug Discovery**.
-<img src="images/fig1_overview.png" width=85% height=85%/> 
+<img src="images/fig1_overview.png" width=65% height=65%/> 
 
 # Data
 
