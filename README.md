@@ -9,12 +9,18 @@ This is the official codebase for **A Guide for Active Learning in Synergistic D
 conda env create -f environment.yml 
 ```
 
-When the environment was installed, you can just
+When the environment was installed, you could just
 
 ```bash 
 conda activate drugsynergy 
 ```
 
+Or you can install you simple environments by:
+```
+conda create -n drugsynergy python
+conda install pytorch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 pytorch-cuda=12.1 -c pytorch -c nvidia
+pip install scikit-learn  matplotlib scikit-learn matplotlib pyarrow tqdm pandas
+```
 Now you can have fun with the code:
 
 # Data
