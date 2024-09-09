@@ -79,3 +79,19 @@ python test.py --flag comb
 # leave-tissue-out
 python test.py --flag tissue 
 ```
+
+## Possible problems & Solution
+If you have several GPU, you can choose GPU by adding device command, such as:
+```bash
+python mlp_model_benchmark.py --frac 0.1 --drug_feature morgan --cell_feature ge --operation additive --device 'cuda:0'
+python mlp_model_benchmark.py --frac 0.1 --drug_feature morgan --cell_feature ge --operation additive --device 'cuda:1'
+```
+If you don't have GPU or your GPU memory is not enough for the training, you can use CPU by adding device in the command such as:
+```bash
+python main.py --num_drugs 50 --num_step_limit 10 --flag_acquisition 'exploitation' --device 'cpu'
+
+python mlp_model_benchmark.py --frac 0.1 --drug_feature morgan --cell_feature ge --operation additive --device 'cpu'
+
+python test.py --flag tissue --device 'cpu'
+
+```
