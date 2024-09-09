@@ -3,6 +3,20 @@
 This is the official codebase for **A Guide for Active Learning in Synergistic Drug Discovery**.
 <img src="images/fig1_overview.png" width=65% height=65%/> 
 
+# Environment Install 
+
+```bash 
+conda env create -f environment.yml 
+```
+
+When the environment was installed, you can just
+
+```bash 
+conda activate drugsynergy 
+```
+
+Now you can have fun with the code:
+
 # Data
 
 [DrugComb data](https://drugcomb.org/download/)
