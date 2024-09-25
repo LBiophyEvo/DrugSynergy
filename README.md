@@ -32,13 +32,13 @@ Then use preprocess/F1_get_data.py to extract Oneil and Almanac data
 Or you can download data from Almanac by:
 
 ```
-wget -P ./data/init https://drugcomb.fimm.fi/jing/summary_v_1_5.csv
+wget -P ./data https://drugcomb.fimm.fi/jing/summary_v_1_5.csv
 ```
 
 The cell genomic data can be downloaded by:
 ```
-wget -P ./data/init https://www.cancerrxgene.org/gdsc1000//GDSC1000_WebResources//Data/preprocessed/Cell_line_RMA_proc_basalExp.txt.zip
-unzip ./data/init/Cell_line_RMA_proc_basalExp.txt.zip -d ./data/init
+wget -P ./data https://www.cancerrxgene.org/gdsc1000//GDSC1000_WebResources//Data/preprocessed/Cell_line_RMA_proc_basalExp.txt.zip
+unzip ./data/Cell_line_RMA_proc_basalExp.txt.zip -d ./data
 ```
 
 
