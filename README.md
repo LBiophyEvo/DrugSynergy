@@ -21,7 +21,7 @@ conda create -n drugsynergy python
 conda install pytorch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 pytorch-cuda=12.1 -c pytorch -c nvidia
 pip install scikit-learn  matplotlib scikit-learn matplotlib pyarrow tqdm pandas
 ```
-Now you can have fun with the code:
+Now you can have fun with the code.
 
 # Data
 
