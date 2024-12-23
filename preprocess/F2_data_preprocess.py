@@ -3,7 +3,6 @@ import pandas as pd
 import sys
 sys.path.append('../') 
 from tqdm import tqdm 
-from congfu.utils import get_drug_chembert_384
 # "maccs", "morgan-3", "rdkit-7", "map4"
 from rdkit import Chem
 from rdkit.Chem import AllChem
@@ -79,16 +78,41 @@ def get_feature_dict(df: pd.DataFrame, feature_name: str) -> dict:
             dct[x['id']] = torch.tensor(fp_func.transform([[x['id']]]).toarray().flatten(), dtype = torch.float32)
 
     dct['shape'] = dct[x['id']].shape[0]
-    print(dct[x['id']].shape[0])
         
     return dct
+
+def remove_redudant(mol_mapping):
+    data = []
+    dct = {}
+    mol_names = list(mol_mapping.keys())[:-1]
+    for key in tqdm(mol_names, position=0, leave=True):
+        data.append(mol_mapping[key].numpy())
+    embedding = np.array(data)
+
+    df = pd.DataFrame(data=embedding,index=mol_names,columns=[f'latent_{i}' for i in range(embedding.shape[1])]) 
+
+    # Drop first feature from generator (RDKit2D_calculated)
+    # Drop columns with 0 standard deviation
+    threshold = 0.01
+    columns=[f'latent_{idx}' for idx in np.where(df.std() <= threshold)[0]]
+    print(f'Deleting columns with std<={threshold}: {columns}')
+    df.drop(columns=[f'latent_{idx}' for idx in np.where(df.std() <= 0.01)[0]], inplace=True)
+    for key in mol_names:
+        dct[key] = torch.tensor(df.loc[key].values, dtype = torch.float32)
+    
+    print(dct[key].shape[0])
+    dct['shape'] = dct[key].shape[0]
+    return dct 
+
+
+        
 
 def get_drug_features_dic(study_name: str, feature_name: str):
     data_folder_path = "../data/" + str(study_name) + '/'
     synergy_score = 'loewe'
-    dataset = pd.read_feather(data_folder_path + f"{synergy_score}.feather")
+    dataset = pd.read_feather(data_folder_path + f"{synergy_score}/{synergy_score}.feather")
     mol_mapping = get_feature_dict(dataset, feature_name)
-
+    mol_mapping = remove_redudant(mol_mapping)
     return mol_mapping 
 
 def _get_fpgen(name) -> Callable:
@@ -143,10 +167,9 @@ if __name__ == '__main__':
 
     # -------- get cell one hot representation ------------------------
 
-    for study_name in ['oneil']:
-        data_folder_path = "../data/" + str(study_name) + '/'
-        synergy_score = 'loewe'
-        dataset = pd.read_feather(data_folder_path + f"{synergy_score}.feather")
-        cell_line_feats = get_cell_feature_dict(dataset)
-        cell_line_feats.to_feather("./data/" + str(study_name) + "/" + "cell_lines_onehot.feather")
-
+    # for study_name in ['oneil']:
+    #     data_folder_path = "../data/" + str(study_name) + '/'
+    #     synergy_score = 'loewe'
+    #     dataset = pd.read_feather(data_folder_path + f"{synergy_score}.feather")
+    #     cell_line_feats = get_cell_feature_dict(dataset)
+    #     cell_line_feats.to_feather("./data/" + str(study_name) + "/" + "cell_lines_onehot.feather")
