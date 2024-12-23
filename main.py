@@ -1,8 +1,5 @@
 # run models for several times 
 # this method first try exploration then exploitation 
-from scripts.model import MLP_drug_cell_permutate
-from scripts.evaluation import calculate_accuracy 
-from scripts.util import DrugCombDataset_customized 
 from scripts.active_learning_utils import get_datasets_simple_constraint_v2, selec_data, get_datasets_simple, func_lambd, calculate_derivative
 from scripts.train_model import run_one 
 import joblib 
@@ -13,22 +10,24 @@ import os
 import torch 
 import random 
 import matplotlib.pyplot as plt 
-
-    
+from time import time 
 parser = argparse.ArgumentParser(description='Train a mlp model')
-parser.add_argument('--num_step_limit', type=int, default=10)
-parser.add_argument('--study_name', type=str, default='oneil')
+parser.add_argument('--num_step_limit', type=int, default=5)
+parser.add_argument('--study_name', type=str, default='recover')
 parser.add_argument('--device', type=str, default='cuda:0')
-parser.add_argument('--num_drugs', type=int, default=50)
+parser.add_argument('--num_drugs', type=int, default=30)
 parser.add_argument('--flag_stop', type = bool, default=True)
 # flag_acquisition: exploitation, exploration, random 
 parser.add_argument('--flag_acquisition', type = str, default='exploitation')
 parser.add_argument('--batch_size', type = int, default= 32)
-parser.add_argument('--drug_feature', type=str, default='morgan')
+parser.add_argument('--drug_feature', type=str, default='chembert')
 parser.add_argument('--cell_feature', type=str, default='ge')
 parser.add_argument('--operation', type=str, default='additive')
+parser.add_argument('--task', type=str, default='clf')
+parser.add_argument('--patience_max', type=int, default=10)
 
 
+start_time = time()
 config = parser.parse_args()
 device = torch.device(config.device if torch.cuda.is_available() else 'cpu')
 
@@ -41,14 +40,15 @@ synergy_score = "loewe"
 # ------------------------- Load data -----------------------------------
 # load data, cell feature and drug features 
 
-dataset = pd.read_feather(data_folder_path + f"/{synergy_score}.feather")
+dataset = pd.read_feather(data_folder_path + f"{synergy_score}/{synergy_score}.feather")
 cell_lines = pd.read_feather(data_folder_path + "cell_lines_" + str(config.cell_feature) + ".feather").set_index("cell_line_name")
 cell_lines = cell_lines.astype(np.float32)
 mol_mapping = joblib.load(data_folder_path + 'mol_' + str(config.drug_feature) +'_dic.joblib')
 
 train_dataset_tmp, val_dataset, flag =  get_datasets_simple(study_name = config.study_name, dataset =dataset)
 
-drug_dim = mol_mapping['shape']
+print('the number of positive samples:', train_dataset_tmp.target.sum())
+drug_dim = mol_mapping[list(mol_mapping.keys())[0]].shape[0]
 cell_dim = cell_lines.shape[1]
 
 print('drug_dim and cell_dim: ', drug_dim, cell_dim)
@@ -60,8 +60,6 @@ print(config.study_name, config.flag_stop, config.flag_acquisition)
 hparam = {
     'drug_dim': drug_dim, 
 'cell_dim': cell_dim,
-'hid_dim_1': 2**8,
-'hid_dim': 2**7,
 'lr': 1e-4,
 'wd': 1e-6,
 'max_epoch': 100,
@@ -73,12 +71,24 @@ hparam = {
 'mol_mapping': mol_mapping,
 'drugs_feature': config.drug_feature,
 'cell_feature': config.cell_feature,
-'operation': config.operation 
+'operation': config.operation,
+'patience_max': config.patience_max,
+   
+'predictor_layers':   [
+    drug_dim,
+    128,
+    64,
+    1,
+],
+'merge_n_layers_before_the_end': 2,
+'allow_neg_eigval': True,
+'task': config.task,
+'target': 'target'
 }
 # initial training 
 final_results = {}
 # ------------------------- run the active learning for 5 times -------------------------------------
-for iter in range(5):
+for iter in range(3):
     left_data, train_dataset_initial, flag = get_datasets_simple_constraint_v2(fold_number = 0, dataset = train_dataset_tmp, step_add= config.num_drugs, study_name=config.study_name)
     max_fold = 5 
     sigma_pred, results, mean_pred = run_one(train_dataset_initial, left_data, max_fold, hparam)
@@ -89,6 +99,7 @@ for iter in range(5):
     lambd =  func_lambd(np.nan, np.nan, config.flag_acquisition)
     while flag:
         if config.flag_acquisition != 'random':
+            # exploration: lambd = 1; exploitation: lambd = 0; 
             pred_comb = lambd*sigma_pred + (1- lambd) * mean_pred 
         else:
             pred_comb = [random.random() for el in range(len(left_data))] 
@@ -111,7 +122,9 @@ for iter in range(5):
     
     final_results[iter] = results_all
 joblib.dump(final_results, save_folder + str(config.flag_acquisition) + '.joblib')
+end_time = time()
 
+print('---------the time needed: ', end_time - start_time, '--------')
 
 
 
