@@ -1,13 +1,9 @@
 # load model
 from scripts.model import MLP_drug_cell_permutate
-from scripts.util import DrugCombDataset_customized, get_datasets_simple
+from scripts.util import get_datasets_simple
 from scripts.evaluation import calculate_accuracy
 from scripts.train_model import train_func
-from torch.utils.data import DataLoader
-from torch import optim, nn, no_grad
-import scanpy as sc 
 import random 
-from sklearn import metrics
 import numpy as np 
 import joblib 
 from joblib import Parallel, delayed 
@@ -16,6 +12,8 @@ import pandas as pd
 import random 
 import argparse 
 import os 
+from time import time 
+from tqdm import tqdm 
 
 
 class run_one:
@@ -25,7 +23,7 @@ class run_one:
 
     def train_one(self, frac, itme):
         random.seed(42 + itme) 
-        model = MLP_drug_cell_permutate(hparam=self.hparam)
+        model = MLP_drug_cell_permutate(config=self.hparam)
         model.to(self.hparam['device'])
         train_dataset_tmp = self.hparam['train_dataset']
         # select fraction of traning data 
@@ -46,15 +44,18 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train a mlp model')
     parser.add_argument('--study_name', type=str, default='oneil')
     # 10 random cross validation 
-    parser.add_argument('--num_run', type=int, default=50)
+    parser.add_argument('--num_run', type=int, default=5)
     # how much percentage of data for training 
-    parser.add_argument('--frac', type=float, default=0.11)
+    parser.add_argument('--frac', type=float, default=1.0)
     parser.add_argument('--device', type=str, default='cuda:0')
     parser.add_argument('--folder', type=str, default='results')
     parser.add_argument('--drug_feature', type=str, default='morgan')
     parser.add_argument('--cell_feature', type=str, default='ge')
     parser.add_argument('--operation', type=str, default='additive')
-    parser.add_argument('--batch_size', type=int, default=256)
+    parser.add_argument('--batch_size', type=int, default=128)
+    # if you want to use such model to do classification: clf, otherwise: reg
+    parser.add_argument('--task', type=str, default='clf')
+    parser.add_argument('--patience_max', type=int, default=10)
 
     config = parser.parse_args()
     device = torch.device(config.device if torch.cuda.is_available() else 'cpu')
@@ -71,7 +72,7 @@ if __name__ == '__main__':
     cell_lines = cell_lines.astype(np.float32)
     mol_mapping = joblib.load(data_folder_path + 'mol_' + str(config.drug_feature) +'_dic.joblib')
 
-    dataset = pd.read_feather(data_folder_path + f"loewe.feather")
+    dataset = pd.read_feather(data_folder_path + f"loewe/loewe.feather")
     dataset, train_dataset_tmp, test_dataset, cell_lines = get_datasets_simple(cell_lines, fold_number = 0, dataset = dataset)
     print('percentage of positive samples in testing data', test_dataset.target.sum()/len(test_dataset))
     drug_dim = mol_mapping['shape']
@@ -86,10 +87,8 @@ if __name__ == '__main__':
     hparam = {
         'drug_dim': drug_dim, 
     'cell_dim': cell_dim,
-    'hid_dim_1': 2**8,
-    'hid_dim': 2**7,
     'lr': 1e-4,
-    'wd': 1e-6,
+    'wd': 1e-2,
     'max_epoch': 100,
     'device': device,
     'train_dataset': train_dataset_tmp,
@@ -99,17 +98,40 @@ if __name__ == '__main__':
     'drugs_feature': config.drug_feature,
     'cell_feature': config.cell_feature,
     'operation': config.operation,
-    'batch_size': config.batch_size
+    'batch_size': config.batch_size,
+    'patience_max': config.patience_max,
+
+    'predictor_layers':   [
+        drug_dim,
+        128,
+        64,
+        1,
+    ],
+    'merge_n_layers_before_the_end': 2,
+    'allow_neg_eigval': True,
+    'task': config.task,
+    'target': 'target'
     }
 
     iter_run_one = run_one(hparam=hparam)
 
     frac = config.frac 
     results_leave = {} 
-    r = Parallel(n_jobs=-1)(delayed(iter_run_one.train_one)(frac, iter) for iter in range(config.num_run))
-    for id in range(len(r)):
-        results_leave[(frac, id)] = r[id]
-    joblib.dump(results_leave, save_folder + str(config.operation) + '_' + str(config.drug_feature) + '_cell_' + str(config.cell_feature) + '_frac_' + str(frac) + '.joblib')
+    # r = Parallel(n_jobs=-1)(delayed(iter_run_one.train_one)(frac, iter) for iter in range(config.num_run))
+    # for id in range(len(r)):
+    #     results_leave[(frac, id)] = r[id]
+    times = []
+    for iter in tqdm(range(5)):
+        time0 = time()
+        iter_run_one.train_one(frac, iter)
+        time1 = time()
+        time_need = time1 - time0 
+        times.append(time_need)
+        print(f'time needed: {time_need}')
+    print(np.mean(times), np.std(times))
+    joblib.dump(times, 'results/time_mlp.joblib')
+    
+    # joblib.dump(results_leave, save_folder + str(config.operation) + '_' + str(config.drug_feature) + '_cell_' + str(config.cell_feature) + '_frac_' + str(frac) + '.joblib')
 
-    print(results_leave)
+    # print(results_leave)
  
