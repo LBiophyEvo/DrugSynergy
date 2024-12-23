@@ -156,11 +156,18 @@ def get_datasets_simple_constraint_v2(fold_number: int,
         dataset_sub_index2 = dataset[(dataset.Drug2_ID.isin(fda_approved_drugs))&(~dataset.Drug1_ID.isin(fda_approved_drugs))].index
         index_initial = list(dataset_sub_index1) + list(dataset_sub_index2)
         test_num, _ = sample_constrain(index_initial, dataset, step_add)
+
+        # test_num = random.sample(index_initial, step_add)
+
         train_num = [inde for inde in range(len(dataset)) if inde not in test_num]
     else:
         lenth = len(dataset)
         random.seed(42 + fold_number)
         random_num = random.sample(range(0, lenth), lenth)
+        
+        # test_num = random.sample(random_num, step_add)
+
+        # train_num = [inde for inde in range(len(dataset)) if inde not in test_num]
         test_num, train_num = sample_constrain(random_num, dataset, step_add)
     if train_num != None:
         train_dataset, test_dataset, flag = dataset.iloc[train_num], dataset.iloc[test_num], True
@@ -186,7 +193,6 @@ def selec_data_index(pred_prob, index_sort, left_data, step_add):
     else:
         end_id_c = 5 
     cells = list(group_data['Cell_Line_ID'].iloc[:end_id_c])
-    print(cells)
     left_data = left_data.drop(columns=['pred'])
     index_selec, index_no_selec = sample_constrain_strong(index_sort, left_data, step_add, cells)
     
@@ -203,13 +209,17 @@ def selec_data(pred_prob, left_data, step_add, flag_early_stop = False, num_step
             flag = False
         else:
             index_sort = np.argsort(pred_prob)[::-1]
-            index_selec, index_no_selec = selec_data_index(pred_prob, index_sort, left_data, step_add)
+            index_selec = index_sort[:step_add]
+            index_no_selec = index_sort[step_add:]
+            # index_selec, index_no_selec = selec_data_index(pred_prob, index_sort, left_data, step_add)
             data_select = left_data.iloc[index_selec]
             data_no_selec = left_data.iloc[index_no_selec]
             flag = True 
     else:
         index_sort = np.argsort(pred_prob)[::-1]
-        index_selec, index_no_selec = selec_data_index(pred_prob, index_sort, left_data, step_add)
+        index_selec = index_sort[:step_add]
+        index_no_selec = index_sort[step_add:]
+        # index_selec, index_no_selec = selec_data_index(pred_prob, index_sort, left_data, step_add)
         data_select = left_data.iloc[index_selec]
         data_no_selec = left_data.iloc[index_no_selec]
         if num_step > num_step_limit:

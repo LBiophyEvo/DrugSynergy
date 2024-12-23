@@ -1,123 +1,188 @@
+import torch
+import numpy as np
+import torch.nn as nn
+from torch.nn import Parameter
+# The model can refer to 
+# Paper : RECOVER identifies synergistic drug combinations in vitro through sequential model optimization
+# https://doi.org/10.1016/j.crmeth.2023.100599 
+########################################################################################################################
+# Modules
+########################################################################################################################
 
-import torch 
-from torch import nn, cat as tcat, tensor, optim, LongTensor, flatten
-from torch.utils.data import DataLoader, random_split
-import torch.nn.functional as F
 
-class Block_nn(torch.nn.Module):
-    """
-    Represents a neural network block consisting of a sequence of linear layers
-    and ReLU activations. The number of layers is configurable.
+class LinearModule(nn.Linear):
+    def __init__(self, in_features, out_features, bias=True):
+        super(LinearModule, self).__init__(in_features, out_features, bias)
 
-    Attributes:
-        fit (nn.ModuleList): A list of layers in the block.
+    def forward(self, input):
+        x, cell_line = input[0], input[1]
+        return [super().forward(x), cell_line]
 
-    Args:
-        dim_in (int): The input dimension.
-        dim_out (int): The output dimension.
-        hid_dim (int): The hidden dimension.
-    Methods:
-        forward(x): Defines the forward pass of the block.
-    """
-    def __init__(self, dim_in, hid_dim, dim_out):
-        super(Block_nn, self).__init__()
 
-        self.fit = nn.Sequential(
-            nn.Linear(dim_in, hid_dim),
-            nn.BatchNorm1d(hid_dim),
-            nn.ReLU(),
-            nn.Linear(hid_dim, hid_dim//2),
-            nn.BatchNorm1d(hid_dim//2),
-            nn.ReLU(),
-            nn.Linear(hid_dim//2, dim_out),
-        )
-    
-    def forward(self, x):
-        return self.fit(x)
-class MLP_drug_cell_permutate(nn.Module):
-    """
-    MLP model for prediction of the probability of being synergy or synergy score.
+class ReLUModule(nn.ReLU):
+    def __init__(self):
+        super(ReLUModule, self).__init__()
 
-    Attributes:
-        fit_pred  (nn.ModuleList): A list of layers in the block. This block takes the embedding of drugs.
-        and cells, then predict the synergy probability or synergy score. 
-        drug_emb (nn.ModuleList): A list of layers in the block. This block is to reduce the dimension of drug features.
-        cell_emb (nn.ModuleList): A list of layers in the block. This block is to reduce the dimension of cell features.
+    def forward(self, input):
+        x, cell_line = input[0], input[1]
+        return [super().forward(x), cell_line]
 
-    Args:
-        hparam (dic): A dictionary for hyperparameters.
-        - drug_dim (int): The dimension of drug features.
-        - cell_dim (int): The dimension of cell features.
-        - hid_dim (int): The dimension for drug&cell embedding. 
-        - hid_dim_1 (int): The hidden dimension in dimension reducer block. 
-        - cell_feature (str): The type of cell feature, i.e., ['ge', 'onehot']
-        - drug_feature (str): The type of drug feature, i.e., ['morgan', 'onehot', 'chembert_384', 'map4', 'maccs' ]
-        - operation (str) : The type of invariant permutation function, i.e., ['bilinear', 'additive' , 'max', 'other'] 
-        regress (bool): A variable to define the task: if regress = False, output will be  
-        probability of synergy, otherwise, it is the synergy score predcition. 
+class SigmoidModule(nn.Sigmoid):
+    def __init__(self):
+        super(SigmoidModule, self).__init__()
 
-    Methods:
-        permute_operation(emb_1, emb_2): Define the permutation function for drug embeddings. 
-        forward(drug_a, drug_b, cell): Defines the forward pass of model. 
-    """
-    def __init__(self, hparam, regress = False):
+    def forward(self, input):
+        x, cell_line = input[0], input[1]
+        return [super().forward(x), cell_line]
+
+class DropoutModule(nn.Dropout):
+    def __init__(self, p):
+        super(DropoutModule, self).__init__(p)
+
+    def forward(self, input):
+        x, cell_line = input[0], input[1]
+        return [super().forward(x), cell_line]
+
+
+class FilmModule(torch.nn.Module):
+    def __init__(self, num_cell_lines, out_dim):
+        super(FilmModule, self).__init__()
+        film_init = 1 / 100 * torch.randn(num_cell_lines, 2 * out_dim)
+        film_init = film_init + torch.Tensor([([1] * out_dim) + ([0] * out_dim)])
+
+        self.film = Parameter(film_init)
+
+    def forward(self, input):
+        x, cell_line = input[0], input[1]
+        return [
+            self.film[cell_line][:, : x.shape[1]] * x
+            + self.film[cell_line][:, x.shape[1]:],
+            cell_line]
+
+
+class FilmWithFeatureModule(torch.nn.Module):
+    def __init__(self, num_cell_line_features, out_dim):
+        super(FilmWithFeatureModule, self).__init__()
+
+        self.out_dim = out_dim
+
+        self.condit_lin_1 = nn.Linear(num_cell_line_features, num_cell_line_features)
+        self.condit_relu = nn.ReLU()
+        self.condit_lin_2 = nn.Linear(num_cell_line_features, 2 * out_dim)
+
+        # Change initialization of the bias so that the expectation of the output is 1 for the first columns
+        self.condit_lin_2.bias.data[: out_dim] += 1
+
+    def forward(self, input):
+        x, cell_line_features = input[0], input[1]
+
+        # Compute conditioning
+        condit = self.condit_lin_2(self.condit_relu(self.condit_lin_1(cell_line_features)))
+
+        return [
+            condit[:, :self.out_dim] * x
+            + condit[:, self.out_dim:],
+            cell_line_features
+        ]
+
+
+class LinearFilmWithFeatureModule(torch.nn.Module):
+    def __init__(self, num_cell_line_features, out_dim):
+        super(LinearFilmWithFeatureModule, self).__init__()
+
+        self.out_dim = out_dim
+
+        self.condit_lin_1 = nn.Linear(num_cell_line_features, 2 * out_dim)
+
+        # Change initialization of the bias so that the expectation of the output is 1 for the first columns
+        self.condit_lin_1.bias.data[: out_dim] += 1
+
+    def forward(self, input):
+        x, cell_line_features = input[0], input[1]
+
+        # Compute conditioning
+        condit = self.condit_lin_1(cell_line_features)
+
+        return [
+            condit[:, :self.out_dim] * x
+            + condit[:, self.out_dim:],
+            cell_line_features
+        ]
+
+
+########################################################################################################################
+# Bilinear MLP
+########################################################################################################################
+
+
+class MLP_drug_cell_permutate(torch.nn.Module):
+    def __init__(self, config):
+
         super(MLP_drug_cell_permutate, self).__init__()
-        drug_dim = hparam['drug_dim']
-        cell_dim = hparam['cell_dim']
-        hid_dim = hparam['hid_dim']
-        hid_dim_1 = hparam['hid_dim_1']
-        self.operation = hparam['operation']
 
-        try:
-            self.drugs_feature = hparam['drugs_feature']
-        except:
-            self.drugs_feature = 'chembert'
-        try:
-            self.cell_feature = hparam['cell_feature']
-        except:
-            self.cell_feature = 'ge'
-    
-        if self.drugs_feature == 'onehot':
-            self.drug_emb = nn.Embedding(drug_dim, hid_dim)
-        else:
-            self.drug_emb = Block_nn(drug_dim, hid_dim_1, hid_dim)
+        self.device = config['device']
+        predictor_layers = config['predictor_layers']
+        self.layer_dims = config['predictor_layers']
+        self.task =  config['task']
+        self.operation = config['operation']
 
-        if self.cell_feature == 'ge':
-            self.cell_emb = Block_nn(cell_dim, hid_dim_1, hid_dim)
-        else:
-            self.cell_emb = nn.Embedding(cell_dim, hid_dim)
-        if self.operation in ['sort', 'other']:
-            input_dim = 3*hid_dim
-        else:
-            input_dim = 2*hid_dim 
-        self.fit_pred = nn.Sequential(
-            nn.Linear(input_dim, hid_dim),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(hid_dim, hid_dim_1),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(hid_dim_1, 1),
+        self.merge_n_layers_before_the_end = config["merge_n_layers_before_the_end"]
+        self.merge_dim = self.layer_dims[-self.merge_n_layers_before_the_end - 1]
 
-        )
+        assert 0 < self.merge_n_layers_before_the_end < len(predictor_layers)
 
-        self.nn_out = nn.Sigmoid()
-        self.relu = nn.ReLU()
-        self.regress = regress
-        if self.operation == 'bilinear':
-            self.bilinear_weights = nn.Parameter(
-                1 / 100 * torch.randn((hid_dim, hid_dim, hid_dim))
-                + torch.cat([torch.eye(hid_dim)[None, :, :]] * hid_dim, dim=0)
+        layers_before_merge = []
+        layers_after_merge = []
+
+        # Build early layers (before addition of the two embeddings)
+        for i in range(len(self.layer_dims) - 1 - self.merge_n_layers_before_the_end):
+            layers_before_merge = self.add_layer(
+                layers_before_merge,
+                i,
+                self.layer_dims[i],
+                self.layer_dims[i + 1]
             )
-            self.bilinear_offsets = nn.Parameter(1 / 100 * torch.randn((hid_dim)))
 
-        
+        # Build last layers (after addition of the two embeddings)
+        for i in range(
+            len(self.layer_dims) - 1 - self.merge_n_layers_before_the_end,
+            len(self.layer_dims) - 1,
+        ):
+
+            layers_after_merge = self.add_layer(
+                layers_after_merge,
+                i,
+                self.layer_dims[i],
+                self.layer_dims[i + 1]
+            )
+
+        self.before_merge_mlp = nn.Sequential(*layers_before_merge)
+        self.after_merge_mlp = nn.Sequential(*layers_after_merge)
+
+        # Initialize weights close to identity
+        if self.operation == 'bilinear':
+            self.bilinear_weights = Parameter(
+                1 / 100 * torch.randn((self.merge_dim, self.merge_dim, self.merge_dim))
+                + torch.cat([torch.eye(self.merge_dim)[None, :, :]] * self.merge_dim, dim=0)
+            )
+            self.bilinear_offsets = Parameter(1 / 100 * torch.randn((self.merge_dim)))
+
+            self.allow_neg_eigval = config["allow_neg_eigval"]
+            if self.allow_neg_eigval:
+                self.bilinear_diag = Parameter(1 / 100 * torch.randn((self.merge_dim, self.merge_dim)) + 1)
+    
     def permute_operation(self, emb_1, emb_2):
         # additive , max, multiplication, sort and concate, bilinear
         if self.operation == 'additive':
             lat = emb_1+emb_2
         elif self.operation == 'max':
             lat = torch.max(emb_1, emb_2)
+        elif self.operation == 'multiply':
+            lat = emb_1*emb_2
+        elif self.operation == 'sort':
+            cat_lat = torch.cat([emb_1, emb_2], dim = 1)
+
+            lat, _ = torch.sort(cat_lat) 
             
         elif self.operation == 'bilinear':
             # compute <W.h_1, W.h_2> = h_1.T . W.T.W . h_2
@@ -135,24 +200,32 @@ class MLP_drug_cell_permutate(nn.Module):
         else:
             lat = torch.cat([emb_1, emb_2], dim = 1)
         return lat 
+    def forward(self, h_drug_1, h_drug_2, cell_lines ):
+    
+        # Apply before merge MLP
+        h_1 = self.before_merge_mlp([h_drug_1, cell_lines])[0]
+        h_2 = self.before_merge_mlp([h_drug_2, cell_lines])[0]
+
+       
+        h_1_scal_h_2 = self.permute_operation(h_1, h_2)
+        comb = self.after_merge_mlp([h_1_scal_h_2, cell_lines])[0]
+
+        return comb
+
+    def add_layer(self, layers, i, dim_i, dim_i_plus_1):
+        layers.extend(self.linear_layer(i, dim_i, dim_i_plus_1))
+        if self.task == 'clf':
+            if i != len(self.layer_dims) - 2:
+                layers.append(ReLUModule())
+            else:
+                layers.append(SigmoidModule())
+        else:
+            if i != len(self.layer_dims) - 2:
+                layers.append(ReLUModule())
+
+        return layers
+
+    def linear_layer(self, i, dim_i, dim_i_plus_1):
+        return [LinearModule(dim_i, dim_i_plus_1)]
 
 
-    def forward(self, drug_a, drug_b, cell):
-        if self.drugs_feature == 'onehot':
-            emb_1, emb_2 = drug_a@self.drug_emb.weight, drug_b@self.drug_emb.weight
-        else:
-            emb_1, emb_2 = self.drug_emb(drug_a).squeeze(1), self.drug_emb(drug_b).squeeze(1)
-        
-        if self.cell_feature == 'ge':
-            emb_3 = self.cell_emb(cell).squeeze(1)
-        else:
-            emb_3 = cell@self.cell_emb.weight    
-            
-        lat = self.permute_operation(emb_1, emb_2)
-        emb = tcat((lat, emb_3), dim=1)
-        pred = self.fit_pred(emb)
-        if self.regress:
-            return pred 
-        else:
-            label = self.nn_out(pred)
-            return label 

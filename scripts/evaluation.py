@@ -14,6 +14,13 @@ def find_nearest(array, value):
     idx = (np.abs(array - value)).argmin()
     return idx
 
+def eval_accuracy(pred_y, real_y, task = 'clf'):
+    if task == 'reg':
+        res = calculate_accuracy_regression(pred_y, real_y)
+    else:
+        res = calculate_accuracy(pred_y, real_y)
+    return res 
+
 def calculate_accuracy(test_prob, test_label, thred = 0.75):
     '''
     calculate the accuracy of model: ['ROC-AUC', 'PR-AUC', 'ACCURACY', 'PRECISION', 'RECALL', 'RECALL when PRECISION if 0.75']
@@ -69,4 +76,4 @@ def calculate_accuracy_regression(predict_fit, test_fit):
     pear = pearsonr(predict_fit.flatten(), test_fit.flatten())[0]
     spear = spearmanr(predict_fit.flatten(), test_fit.flatten())[0]
     r2 = r2_score(predict_fit.flatten(), test_fit.flatten())
-    return [pear, spear, r2]
+    return [pear, r2, spear]
